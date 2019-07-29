@@ -1,0 +1,87 @@
+
+import numpy as np
+import matplotlib.pyplot as plt
+
+
+
+###############################################################################
+class ImageProperties:
+    
+    def __init__(self, array3D):
+        self.array = array3D
+        self.size = array3D.shape
+        self.max = np.amax(self.array)
+        self.min = np.amin(self.array)
+        
+        # Size of the 3D matrix:
+        self.size3D = array3D.shape
+        (self.sizeX,self.sizeY,self.sizeZ) = self.size3D
+        
+        # Central positions along x, y, z:
+        self.X0 = int(float(self.sizeX)/2)
+        self.Y0 = int(float(self.sizeY)/2)
+        self.Z0 = int(float(self.sizeZ)/2)
+   
+    def to2D(self, type):
+        if type=="slice":
+            imageXY = self.array [:,:,self.Z0]
+            imageXZ = self.array [:,self.Y0,:]
+            imageYZ = self.array [self.X0,:,:]
+        elif type=="sum" or type=="average":
+            imageXY = self.array .sum(axis=2)
+            imageXZ = self.array .sum(axis=1)
+            imageYZ = self.array .sum(axis=0)
+        else:
+            imageXY = imageXZ = imageYZ = 0
+            
+        return imageXY, imageXZ, imageYZ
+            
+        
+    def toPlot(self, fIndex = 1):
+        plt.figure(fIndex)
+
+        # Load the 2D slices using the function to2D:
+        imageX_Y_Z0, imageX_Y0_Z, imageX0_Y_Z = self.to2D(type="slice")
+        
+        # Load the 2D sum image using the function to2D:
+        imageXY, imageXZ, imageYZ = self.to2D(type="sum")
+
+        # Plot of slices along the 3D:
+        plt.subplot(2, 3, 1)
+        plt.imshow(imageX_Y_Z0)
+        plt.title("image(X,Y,Z0)")
+        plt.xlabel("Y")
+        plt.ylabel("X")
+        
+        plt.subplot(2, 3, 2)
+        plt.imshow(imageX_Y0_Z)
+        plt.title("image(X,Y0,Z)")
+        plt.xlabel("Z")
+        plt.ylabel("X")
+        
+        plt.subplot(2, 3, 3)
+        plt.imshow(imageX0_Y_Z)
+        plt.title("image(X0,Y,Z)")
+        plt.xlabel("Z")
+        plt.ylabel("Y")
+        
+        # Plot of 2D images resulting from the sum over 1D:
+        plt.subplot(2, 3, 4)
+        plt.imshow(imageXY)
+        plt.title("image(X,Y)")
+        plt.xlabel("Y")
+        plt.ylabel("X")
+        
+        plt.subplot(2, 3, 5)
+        plt.imshow(imageXZ)
+        plt.title("image(X,Z)")
+        plt.xlabel("Z")
+        plt.ylabel("X")
+        
+        plt.subplot(2, 3, 6)
+        plt.imshow(imageYZ)
+        plt.title("image(Y,Z)")
+        plt.xlabel("Z")
+        plt.ylabel("Y")
+        #plt.show()
+###############################################################################
