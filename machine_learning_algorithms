@@ -1,0 +1,635 @@
+
+import numpy as np
+import sys
+import time
+import matplotlib.pyplot as plt
+import imageAnalysis as ia
+import random
+
+from skimage.feature import greycomatrix, greycoprops
+from skimage import img_as_ubyte
+from scipy import stats
+
+from sklearn import linear_model
+
+import sklearn.svm as svm
+from sklearn.svm import SVC
+from sklearn.metrics import log_loss
+from sklearn.ensemble import RandomForestClassifier, AdaBoostClassifier, VotingClassifier, BaggingClassifier, GradientBoostingClassifier
+from sklearn.calibration import CalibratedClassifierCV
+from sklearn.neural_network import MLPClassifier
+from sklearn.neighbors import KNeighborsClassifier
+from sklearn.gaussian_process import GaussianProcessClassifier
+from sklearn.gaussian_process.kernels import RBF
+from sklearn.linear_model import LogisticRegression
+
+from sklearn.multiclass import OneVsRestClassifier
+from sklearn.multioutput import MultiOutputClassifier
+
+class Features:
+   
+    def __init__(self, datasetDic):
+        
+      
+        self.dataset = datasetDic
+        self.nData =  len( self.dataset ) 
+        
+       
+        (self.sizeX, self.sizeY, self.sizeZ) = self.dataset[0].shape
+        
+        
+        self.nVoxels = self.sizeX * self.sizeY * self.sizeZ
+        
+        
+        self.X0 = int(float(self.sizeX)/2)
+        self.Y0 = int(float(self.sizeY)/2)
+        self.Z0 = int(float(self.sizeZ)/2)
+        
+        
+    def featureExtraction(self, **featureType):
+       
+        it = 0
+   
+        functionDic = {}
+        functionDic["gridOperation"] = self.gridOperation
+       
+        
+        for k,v in featureType.items():
+            
+           # if isinstance(v,dict):
+               
+                localFeatures, binEdge = functionDic[k](**v)
+                featureMatrix = localFeatures
+          
+                return featureMatrix, binEdge
+            
+###############################################################################          
+            
+    def gridOperation(self, typeOp=["mean"], nGrid=(10,10,"center"), npoly=1,\
+                      binEdges = []):
+       
+       
+       
+        datasetDic = self.dataset
+        
+        nOp = len(typeOp)
+        
+        if npoly < 1:
+            npoly = 1
+       
+       
+        if len(nGrid) == 2:
+            nDimension = 2
+            axis = 2
+            type2D = "center"
+        else:
+            nDimension = 3
+            for i in range(2):
+                if isinstance(nGrid[i], str):
+                    nDimension = 2
+                    axis = i
+                    type2D = [nGrid[i]]                                  
+            
+        
+        nGridX = nGrid[0]
+        nGridY = nGrid[1]
+        if nDimension == 3:
+            nGridZ = nGrid[2]
+           
+       
+        xlength = []
+        ylength  =[]
+        xlength.append(0)
+        ylength.append(0)
+        
+        xGrid = 0
+        yGrid = 0
+        
+        for i in range(nGridX):
+            xGrid += int(round((self.sizeX-xGrid)/(nGridX-i)))
+            xlength.append(xGrid)
+            
+        for i in range(nGridY):
+            yGrid += int(round((self.sizeY-yGrid)/(nGridY-i)))
+            ylength.append(yGrid)
+        
+        if nDimension == 3:
+            zlength =[]
+            zlength.append(0)
+            zGrid = 0
+            for i in range(nGridZ):
+                zGrid += int(round((self.sizeZ-zGrid)/(nGridZ-i)))
+                zlength.append(zGrid)
+        nBins=binEdges
+       
+        histoMatrix = np.empty([nGridX, nGridY, nGridZ, nBins])
+        histo = np.empty([self.nData, nGridX*nGridY*nGridZ*nBins])
+       
+       
+        CalculDone = 1
+        statusBar =""
+        sampleStatus = 1 # in %
+        nbSampleStatus = int(100 / sampleStatus)
+        
+        for iDataset in range(self.nData):
+            if iDataset == 0:
+                startTime = time.time()
+            
+            for iX in range(nGridX):
+                for iY in range(nGridY):
+                     for iZ in range(nGridZ):
+                            gridZone = datasetDic[iDataset][ \
+                                            xlength[iX] : xlength[iX+1], \
+                                            ylength[iY] : ylength[iY+1], \
+                                            zlength[iZ] : zlength[iZ+1]] 
+               
+                            for iPolyOrder in range(npoly):
+                                for iOp, Op in enumerate(typeOp):
+                                    
+                                    if Op in ["average", "Average", "mean"]:
+                                        featureMatrix[iX, iY, iZ, iOp, \
+                                                      iPolyOrder] = \
+                                        np.mean(gridZone)**(iPolyOrder+1)
+                                    '''  
+
+                                    if Op in ["median"]:
+                                        featureMatrix[iX, iY, iZ, iOp, \
+                                                      iPolyOrder] = \
+                                        np.median(gridZone)**(iPolyOrder+1)
+                                        
+                                    elif Op in ["max", "Max"]:
+                                        featureMatrix[iX, iY, iZ, iOp, \
+                                                      iPolyOrder] = \
+                                        np.amax(gridZone)**(iPolyOrder+1)
+                                        
+                                    elif Op in ["min", "Min"]:
+                                        featureMatrix[iX, iY, iZ, iOp, \
+                                                      iPolyOrder] = \
+                                        np.amin(gridZone)**(iPolyOrder+1)
+                                    ''' 
+                                    if Op == "histogram":
+                                        histoLocal,_ = np.histogram(gridZone.flatten(),\
+                                                         binEdges)
+                                        histoMatrix[iX, iY, iZ, :] = histoLocal
+                                      
+                                    
+                                    elif Op == "subhistogram":
+                                        histoLocal,_ = np.histogram(gridZone.flatten(),\
+                                                         binEdges[iX, iY, iZ, :])
+                                        histoMatrix[iX, iY, iZ, :] = histoLocal
+                                        
+                                    elif Op in ["contrast3D", "Michelson"]:
+                                        minGrid = np.amin(gridZone)
+                                        maxGrid = np.amax(gridZone)
+                                        if minGrid == 0 and minGrid == 0:
+                                            michelsonContrast = 0
+                                        else:
+                                            michelsonContrast = \
+                                            (maxGrid-minGrid)/(maxGrid+minGrid)
+                                        
+                                        featureMatrix[iX, iY, iZ, iOp, \
+                                                      iPolyOrder] = \
+                                        michelsonContrast**(iPolyOrder+1)
+                                        
+                                    elif Op in ["variance", "var", \
+                                                "Expectation", "expectation"]:
+                                        featureMatrix[iX, iY, iZ, iOp, \
+                                                      iPolyOrder] = \
+                                        np.var(gridZone)**(iPolyOrder+1)
+                                        
+                                    elif Op in ["covariance", "cov"]:
+                                        featureMatrix[iX, iY, iOp, iPolyOrder] = \
+                                        np.cov(gridZone)**(iPolyOrder+1)
+                                    '''
+                                    elif Op in ["sum", "Sum"]:
+                                        featureMatrix[iX, iY, iOp, iPolyOrder] = \
+                                        np.sum(gridZone)**(iPolyOrder+1)
+                                    '''
+                  
+            status = (100 * (iDataset+1) / (self.nData))
+            if iDataset == 0:
+                endTime = time.time()
+                time1Iteration = endTime - startTime
+                totalTime = 100 * time1Iteration / status
+                
+            if status > CalculDone * sampleStatus:
+                    CalculDone += 1
+                    #statusBar += "="
+                    remainingTime = int(round(totalTime * (1 - CalculDone*sampleStatus/100))) 
+                    #print("\r" + statusBar)
+                    sys.stdout.write("\r" + "=" * CalculDone + \
+                         " " * (nbSampleStatus-CalculDone) + str(remainingTime)+"s" )
+                    sys.stdout.flush() 
+             
+            
+           
+            if ("histogram" in typeOp) or ("subhistogram" in typeOp):
+                histo[iDataset,:] = histoMatrix.flatten()
+                if len(typeOp) > 1:
+                    features[iDataset,:] = featureMatrix.flatten()
+            else:
+                features[iDataset,:] = featureMatrix.flatten()
+        print("")
+        
+        
+        if ("histogram" in typeOp) or ("subhistogram" in typeOp):
+            if len(typeOp) == 1:
+                return histo, binEdges
+            else:
+                return np.append(features, histo), binEdges
+        else:
+            return features, 1
+  
+    
+        
+###############################################################################        
+
+   
+###############################################################################          
+###############################################################################      
+            
+class Prediction:
+    
+    def __init__(self, featuresMatrix, label=[], multiLabels=[], \
+                 classToLabels=[]):
+        """
+        Constructuctor of the class Prediction
+        """
+        
+        
+        self.features = featuresMatrix
+      
+        
+        self.label = label
+        
+    
+        self.multiLabels = multiLabels
+        
+        
+        self.classToLabels = classToLabels
+
+        (self.nSamples, self.nFeatures) = featuresMatrix.shape
+        
+        
+    def buildClassifier( self, featureTraining, label, methodDic=[], method = "LASSO"):
+       
+       
+        regression = False
+       
+        if method == "SVM": 
+            clf = svm.SVC(**methodDic)
+        elif method == "SVC":
+            if methodDic == []:
+                 clf = SVC(C=1.0, cache_size=200, decision_function_shape='ovr', kernel='rbf', \
+                      probability=True, shrinking=True, verbose=False)
+            else:
+                clf = SVC(**methodDic)
+        elif method == "Random Forest":
+            clf = RandomForestClassifier(**methodDic)
+        elif method == "AdaBoost":
+            clf = AdaBoostClassifier(**methodDic)
+        elif method == "Bagging":
+            clf = BaggingClassifier(**methodDic)
+        elif method == "Gradient Boosting":
+            clf = GradientBoostingClassifier(**methodDic)
+        
+        
+        clf.fit( featureTraining, label )
+        
+        if (not regression):
+            return clf
+       
+        
+            
+    def predict(self, features, method, parameters=[], labelValidation=[], classifier=[]):
+        
+        
+        nbSamples = features.shape[0]
+
+        if method in ["Random Forest", "AdaBoost", "Bagging", "Gradient Boosting"]:
+            predictedData = classifier.predict_proba( features )[:,1]
+            
+            
+        elif method == "SVM":
+            predictions = classifier.predict( features )
+            predictedData = np.zeros(len(predictions))
+            
+            
+            for i in range (len(predictions)):
+                if predictions[i] == 0:
+                    predictedData[i] = 0 
+                else:
+                    predictedData[i] = 1
+        
+        
+        if len(labelValidation) > 0:
+            if method in ["Random Forest", "SVM", "AdaBoost", "Bagging", "Gradient Boosting"]:
+                error = log_loss(labelValidation, predictedData)
+           
+            else:
+                error = (np.mean((predictedData - labelValidation)**2)) 
+            
+            return predictedData, error
+        else:
+            print(predictedData)
+            return predictedData
+        
+                    
+    def crossValidation(self, methodDic, nFold=10, typeCV="random", \
+                        methodList=["SVM"], stepSize = 0.01):
+      
+        featuresMatrix = self.features 
+        label = self.label
+       
+        
+        nSamples = self.nSamples
+        
+        
+        nModel = len(methodList)
+
+        
+        indices = np.arange(nSamples)
+        
+        
+        samplePerFoldTrain = int(np.floor(nSamples / nFold))
+            
+      
+        sampleTrain = (nFold-1) * samplePerFoldTrain
+
+      
+        sampleTrainCV = nFold * samplePerFoldTrain
+
+       
+        sampleValid = nSamples - sampleTrain
+        
+     
+        indexTrain = {}
+            
+      
+        indexValid = {}
+    
+        scoreArray = np.zeros([nFold])
+        score = np.zeros([nModel])
+        
+    
+        predictions = np.empty([sampleTrainCV])
+        
+      
+        predictMatrix = np.zeros([sampleTrainCV, nModel])
+        
+     
+        nSteps = 1 + 1 / stepSize
+        
+       
+        rangeVector = np.linspace(0.5, 1, nSteps, endpoint=True)
+
+        
+        weightModel = np.ones([nModel])
+        
+       
+        labelTrue = label[:sampleTrainCV]
+        
+      
+        for n, inputMethod in enumerate(methodDic):
+            for i in range(nFold):
+                
+                
+                indexValid = np.arange(i*samplePerFoldTrain, i*samplePerFoldTrain + sampleValid )
+                indexTrain = np.delete(indices, indexValid)
+                
+                
+                clf = self.buildClassifier(featuresMatrix[indexTrain, :], \
+                                label[indexTrain], methodDic=inputMethod, method=methodList[n])
+                
+               
+                
+                predictedData, scoreArray[i] = self.predict( \
+                    features=featuresMatrix[indexValid, :], method=methodList[n], \
+                    parameters=[], labelValidation=label[indexValid], classifier=clf)
+                
+                
+                predictions[i*samplePerFoldTrain : (i+1)*samplePerFoldTrain] \
+                            = predictedData[:samplePerFoldTrain]
+                
+           
+            
+            varianceModel = np.round(np.var(scoreArray),4)
+            
+             
+            score[n] = log_loss(labelTrue, predictions)
+            
+        print("printing results")
+        print(labelTrue)
+        print(predictions)
+        print("results")
+       
+        if nModel == 1:
+            return score, varianceModel
+        else:
+            return scoreBest, weightModel
+
+    def ensembleSelection(self, methodDic, methodList, Ratio=0.8,\
+                          typeDataset="random", stepSize=0.001):
+
+       
+    
+        featuresMatrix = self.features 
+        label = self.label
+        
+       
+        nSamples = self.nSamples
+        
+      
+        nModel = len(methodList) 
+        
+        
+        indices = np.arange(nSamples)
+        
+       
+        sampleTrain = int(np.floor(Ratio * nSamples))
+
+        
+        sampleValid = nSamples - sampleTrain
+        
+      
+        indexTrain = np.arange(sampleTrain)
+       
+       
+        indexValid = np.arange(sampleTrain, nSamples)   
+        
+        score = np.zeros([nModel])        
+        
+       
+        predictions = np.empty([sampleValid, nModel])
+        
+        nSteps = 1 + 1 / stepSize
+        
+        rangeVector = np.linspace(0.5, 1, nSteps, endpoint=True)
+        
+        weightModel = np.ones([nModel])
+
+        
+        labelTrue = label[indexValid]
+
+        clf =[]
+        
+        
+        for n, inputMethod in enumerate(methodDic):
+                                
+            
+            clf.append( self.buildClassifier(featuresMatrix[indexTrain, :], \
+                            label[indexTrain], methodDic=inputMethod, method=methodList[n]))
+           
+           
+            predictions[:,n], score[n] = self.predict( \
+                features=featuresMatrix[indexValid, :], method=methodList[n], \
+                parameters=[], labelValidation=labelTrue, classifier=clf[n])
+ 
+            # Best weighted prediction:
+            predictionBest = predictions[:,n]
+            
+            #print("predictionbest")
+            #print(predictionBest)
+            
+            predictNew = predictions[:,n]
+
+            
+            scoreBest = score[n]
+            '''
+            print("scorebest")
+            print(scoreBest)
+            print("rangevector")
+            print(rangeVector)
+            '''
+            for k in rangeVector:
+                predictNew = k*predictionBest
+                error = log_loss(labelTrue, predictNew)
+                if error < scoreBest:
+                    scoreBest = error
+                    weightModel[n] = k
+            
+            
+            score[n] = round(scoreBest,4)
+           
+            predictions[:,n] *= weightModel[n]  
+            '''               
+            print("predictions")
+            print(predictions)
+            print("weight model")
+            print(weightModel[n])
+            '''
+      
+        rankIndex = np.argsort(score)
+         
+        methodDicOrd = []
+        methodListOrd = []
+
+        if nModel > 1:
+            score = score[rankIndex]
+            weightModel = weightModel[rankIndex]
+            for i in range(nModel):
+                methodDicOrd.append(methodDic[rankIndex[i]])
+                methodListOrd.append(methodList[rankIndex[i]])
+            predictions = predictions[:, rankIndex] 
+        
+        methodDic = methodDicOrd
+        methodList = methodListOrd
+        '''
+        print("methodDic")
+        print(methodDic)
+        print("methodlist")
+        print(methodList)
+        print("weight model is")
+        print(weightModel)
+        '''
+        
+        if nModel == 1:
+            print("{} method performs a score of {}".format(methodList[0], score[0]))
+             
+      
+
+        if nModel > 1:
+
+            rangeVector = np.linspace(0, 1, nSteps, endpoint=True)
+            
+           
+            predictionBest = predictions[:,0]
+            
+            predictNew = predictions[:,0]
+            '''
+            print("predictionbest")
+            print(predictionBest)
+            print("predictionnew")
+            print(predictions)
+            '''
+           
+            scoreBest = score[0]
+            bestIndex = 0
+            
+            for n in range(1,nModel):
+                
+                for i in rangeVector:
+                    predictNew = (1-i)*predictionBest + i*predictions[:,n]
+                    error = log_loss(labelTrue, predictNew)
+                    if error < scoreBest:
+                        
+                        scoreBest = error
+                        bestIndex = i
+                
+                for k in range(n):
+                    
+                    weightModel[k] = (1-bestIndex)*weightModel[k]
+                   
+                weightModel[n] = bestIndex * weightModel[n]
+                
+                predictionBest = np.zeros([sampleValid])
+                for k in range(n+1):
+                    
+                    predictionBest += predictions[:,k] * weightModel[k]
+            
+            scoreBest = round(scoreBest,4)
+            
+      
+        indexSort = np.argsort(labelTrue)
+        labelSort = np.array(labelTrue[indexSort])
+        
+        if nModel == 1:
+            predictedDataSort = np.array(predictions[indexSort])
+        else:
+            predictedDataSort = np.array(predictionBest[indexSort])
+        
+        nSick = np.argmax(labelSort) 
+        
+        
+        predictSickAvg = round(np.mean(predictedDataSort[:nSick-1]),2)
+        
+        
+        predictHealthyAvg = round(np.mean(predictedDataSort[nSick:]),2)
+        
+        print("\nMean prediction:\nfor sick people: {}\nfor healthy people:{}".format(predictSickAvg, predictHealthyAvg))
+        
+        if nModel > 1:
+            print("\nRanking of the models:")
+            for k in range(nModel):
+                if(methodList[k]=="Bagging"):
+                     i-1
+                else:
+                    print("{}) {}: {} ".format(1+k, methodList[k], score[k]))                      
+            
+            print("--> Ensemble selection: {}".format(scoreBest))
+        plt.figure(100)
+        
+       
+        x = np.linspace(1, sampleValid, sampleValid)
+       
+        plt.plot(x, predictedDataSort, color="blue", linewidth=1, \
+                 linestyle='--', marker='o')
+        
+        
+        plt.plot(x, labelSort, color="red", linewidth=1, \
+                 linestyle='--', marker='o')
+       
+        plt.title("Validation of the model")
+        plt.xlabel("Patient number")
+        plt.ylabel("Health condition")
+        return clf, weightModel, scoreBest
